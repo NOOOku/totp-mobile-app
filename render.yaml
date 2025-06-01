@@ -26,6 +26,8 @@ services:
         value: .
       - key: POSTGRES_SSLMODE
         value: require
+      - key: RENDER
+        value: "true"
     scaling:
       minInstances: 1
       maxInstances: 1

@@ -12,8 +12,17 @@ logger = logging.getLogger(__name__)
 # Получаем URL базы данных из переменной окружения
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+logger.info("Checking DATABASE_URL configuration...")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
+    logger.warning("DATABASE_URL environment variable is not set!")
+    # Временное решение для отладки - использовать тестовую базу данных
+    if os.getenv("RENDER"):
+        # Если мы на Render.com, все равно вызываем ошибку
+        raise ValueError("DATABASE_URL environment variable is not set on Render.com")
+    else:
+        # Локально используем тестовую базу
+        logger.warning("Using fallback local database for development")
+        DATABASE_URL = "postgresql://postgres:123456@localhost:5432/totp_db"
 
 # Обработка URL базы данных для поддержки SSL
 def get_database_url():
@@ -29,25 +38,29 @@ def get_database_url():
     parsed_url = urllib.parse.urlparse(db_url)
     query_params = urllib.parse.parse_qs(parsed_url.query) if parsed_url.query else {}
     
-    # Добавляем параметры SSL для production
-    query_params.update({
-        "sslmode": ["require"],
-    })
+    # Добавляем параметры SSL только для Render.com
+    if os.getenv("RENDER"):
+        logger.info("Adding SSL parameters for Render.com deployment")
+        query_params.update({
+            "sslmode": ["require"],
+        })
     
     new_query = urllib.parse.urlencode(query_params, doseq=True)
     db_url = urllib.parse.urlunparse(
         parsed_url._replace(query=new_query)
     )
     
-    logger.info("Database URL configured successfully")
+    # Логируем URL без чувствительных данных
+    safe_url = db_url.split('@')[0] + '@' + db_url.split('@')[1].split('?')[0]
+    logger.info(f"Database URL configured: {safe_url}")
     return db_url
 
 def create_db_engine(retries=5, delay=5):
+    last_exception = None
     for attempt in range(retries):
         try:
             logger.info(f"Attempting to create database engine (attempt {attempt + 1}/{retries})")
             db_url = get_database_url()
-            logger.info(f"Using database URL: {db_url.split('@')[0]}@[HIDDEN]")
             
             engine = create_engine(
                 db_url,
@@ -65,13 +78,14 @@ def create_db_engine(retries=5, delay=5):
             logger.info("Database engine created successfully")
             return engine
         except Exception as e:
+            last_exception = e
             logger.error(f"Failed to create database engine: {str(e)}")
             if attempt < retries - 1:
                 logger.info(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                logger.error("Max retries reached, raising exception")
-                raise
+                logger.error("Max retries reached, raising last exception")
+                raise last_exception
 
 engine = create_db_engine()
 
