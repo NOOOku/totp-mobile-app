@@ -24,6 +24,8 @@ services:
         value: 30
       - key: PYTHONPATH
         value: .
+      - key: POSTGRES_SSLMODE
+        value: require
     scaling:
       minInstances: 1
       maxInstances: 1
@@ -33,4 +35,5 @@ databases:
     databaseName: totp_database
     user: totp_user
     plan: free
-    ipAllowList: [] 
+    ipAllowList: []
+    postgresMajorVersion: 15 

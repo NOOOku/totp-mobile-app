@@ -9,28 +9,35 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Получаем URL базы данных из переменной окружения или используем значение по умолчанию
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:123456@localhost:5432/totp_db")
+# Получаем URL базы данных из переменной окружения
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
 
 # Обработка URL базы данных для поддержки SSL
 def get_database_url():
     logger.info("Configuring database URL...")
+    
+    # Замена postgres:// на postgresql:// если необходимо
     if DATABASE_URL.startswith("postgres://"):
         db_url = DATABASE_URL.replace("postgres://", "postgresql://")
     else:
         db_url = DATABASE_URL
     
-    if "localhost" not in db_url:
-        # Добавляем SSL параметры для production базы данных
-        parsed_url = urllib.parse.urlparse(db_url)
-        query_params = urllib.parse.parse_qs(parsed_url.query)
-        query_params.update({
-            "sslmode": ["require"],
-        })
-        new_query = urllib.parse.urlencode(query_params, doseq=True)
-        db_url = urllib.parse.urlunparse(
-            parsed_url._replace(query=new_query)
-        )
+    # Добавляем SSL параметры
+    parsed_url = urllib.parse.urlparse(db_url)
+    query_params = urllib.parse.parse_qs(parsed_url.query) if parsed_url.query else {}
+    
+    # Добавляем параметры SSL для production
+    query_params.update({
+        "sslmode": ["require"],
+    })
+    
+    new_query = urllib.parse.urlencode(query_params, doseq=True)
+    db_url = urllib.parse.urlunparse(
+        parsed_url._replace(query=new_query)
+    )
     
     logger.info("Database URL configured successfully")
     return db_url
@@ -39,15 +46,17 @@ def create_db_engine(retries=5, delay=5):
     for attempt in range(retries):
         try:
             logger.info(f"Attempting to create database engine (attempt {attempt + 1}/{retries})")
+            db_url = get_database_url()
+            logger.info(f"Using database URL: {db_url.split('@')[0]}@[HIDDEN]")
+            
             engine = create_engine(
-                get_database_url(),
+                db_url,
                 pool_pre_ping=True,
                 pool_size=5,
                 max_overflow=10,
                 connect_args={
                     "connect_timeout": 60,
-                },
-                echo=True
+                }
             )
             
             # Проверяем подключение
