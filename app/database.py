@@ -1,14 +1,20 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import Engine
 import os
 import urllib.parse
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 # Получаем URL базы данных из переменной окружения или используем значение по умолчанию
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:123456@localhost:5432/totp_db")
 
 # Обработка URL базы данных для поддержки SSL
 def get_database_url():
+    logger.info("Configuring database URL...")
     if DATABASE_URL.startswith("postgres://"):
         db_url = DATABASE_URL.replace("postgres://", "postgresql://")
     else:
@@ -26,17 +32,47 @@ def get_database_url():
             parsed_url._replace(query=new_query)
         )
     
+    logger.info("Database URL configured successfully")
     return db_url
 
-engine = create_engine(
-    get_database_url(),
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    connect_args={
-        "connect_timeout": 60,
-    }
-)
+def create_db_engine(retries=5, delay=5):
+    for attempt in range(retries):
+        try:
+            logger.info(f"Attempting to create database engine (attempt {attempt + 1}/{retries})")
+            engine = create_engine(
+                get_database_url(),
+                pool_pre_ping=True,
+                pool_size=5,
+                max_overflow=10,
+                connect_args={
+                    "connect_timeout": 60,
+                },
+                echo=True
+            )
+            
+            # Проверяем подключение
+            with engine.connect() as connection:
+                connection.execute("SELECT 1")
+            logger.info("Database engine created successfully")
+            return engine
+        except Exception as e:
+            logger.error(f"Failed to create database engine: {str(e)}")
+            if attempt < retries - 1:
+                logger.info(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                logger.error("Max retries reached, raising exception")
+                raise
+
+engine = create_db_engine()
+
+@event.listens_for(Engine, "connect")
+def connect(dbapi_connection, connection_record):
+    logger.info("New database connection established")
+
+@event.listens_for(Engine, "disconnect")
+def disconnect(dbapi_connection, connection_record):
+    logger.info("Database connection closed")
 
 SessionLocal = sessionmaker(
     autocommit=False,
