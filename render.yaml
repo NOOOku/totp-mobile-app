@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: totp-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.7
+      - key: DATABASE_URL
+        fromDatabase:
+          name: totp-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+
+databases:
+  - name: totp-db
+    databaseName: totp_database
+    user: totp_user
+    plan: free
+    ipAllowList: [] 
