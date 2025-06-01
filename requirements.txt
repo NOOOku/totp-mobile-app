@@ -4,9 +4,10 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.10
 pydantic==1.10.13
 pydantic[email]
-python-jose[cryptography]
-passlib[bcrypt]
-python-multipart
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
 pyotp==2.9.0
 python-dotenv==1.0.0
-alembic==1.13.1 
+alembic==1.13.1
+sqlalchemy-utils==0.41.1 

@@ -2,9 +2,12 @@ services:
   - type: web
     name: totp-backend
     env: python
+    region: frankfurt  # Выберите ближайший к вам регион
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    startCommand: |
+      python -c "from app.init_app import init_app; init_app()" && \
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
@@ -19,6 +22,8 @@ services:
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: 30
+      - key: PYTHONPATH
+        value: .
     scaling:
       minInstances: 1
       maxInstances: 1
