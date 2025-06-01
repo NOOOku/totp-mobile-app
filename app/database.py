@@ -9,6 +9,18 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Проверка переменных окружения
+logger.info("Checking environment variables...")
+logger.info(f"RENDER env: {os.getenv('RENDER')}")
+logger.info(f"PYTHONPATH env: {os.getenv('PYTHONPATH')}")
+logger.info(f"Available environment variables: {', '.join(sorted(os.environ.keys()))}")
+
 # Получаем URL базы данных из переменной окружения
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -16,8 +28,11 @@ logger.info("Checking DATABASE_URL configuration...")
 if not DATABASE_URL:
     logger.warning("DATABASE_URL environment variable is not set!")
     # Временное решение для отладки - использовать тестовую базу данных
-    if os.getenv("RENDER"):
-        # Если мы на Render.com, все равно вызываем ошибку
+    if os.getenv("RENDER") == "true":
+        # Если мы на Render.com, выводим больше информации для диагностики
+        logger.error("Running on Render.com but DATABASE_URL is not set!")
+        logger.error("This might indicate that the database is not properly linked")
+        logger.error("Please check if the database exists and is properly configured in render.yaml")
         raise ValueError("DATABASE_URL environment variable is not set on Render.com")
     else:
         # Локально используем тестовую базу
@@ -39,7 +54,7 @@ def get_database_url():
     query_params = urllib.parse.parse_qs(parsed_url.query) if parsed_url.query else {}
     
     # Добавляем параметры SSL только для Render.com
-    if os.getenv("RENDER"):
+    if os.getenv("RENDER") == "true":
         logger.info("Adding SSL parameters for Render.com deployment")
         query_params.update({
             "sslmode": ["require"],

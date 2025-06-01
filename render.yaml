@@ -31,6 +31,8 @@ services:
     scaling:
       minInstances: 1
       maxInstances: 1
+    dependencies:
+      - name: totp-db
 
 databases:
   - name: totp-db
