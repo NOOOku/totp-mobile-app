@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import Engine
@@ -9,69 +9,51 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# Проверка переменных окружения
-logger.info("Checking environment variables...")
-logger.info(f"RENDER env: {os.getenv('RENDER')}")
-logger.info(f"PYTHONPATH env: {os.getenv('PYTHONPATH')}")
-logger.info(f"Available environment variables: {', '.join(sorted(os.environ.keys()))}")
-
 # Получаем URL базы данных из переменной окружения
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-logger.info("Checking DATABASE_URL configuration...")
 if not DATABASE_URL:
-    logger.warning("DATABASE_URL environment variable is not set!")
-    # Временное решение для отладки - использовать тестовую базу данных
-    if os.getenv("RENDER") == "true":
-        # Если мы на Render.com, выводим больше информации для диагностики
-        logger.error("Running on Render.com but DATABASE_URL is not set!")
-        logger.error("This might indicate that the database is not properly linked")
-        logger.error("Please check if the database exists and is properly configured in render.yaml")
-        raise ValueError("DATABASE_URL environment variable is not set on Render.com")
-    else:
-        # Локально используем тестовую базу
-        logger.warning("Using fallback local database for development")
-        DATABASE_URL = "postgresql://postgres:123456@localhost:5432/totp_db"
+    raise ValueError("DATABASE_URL environment variable is not set")
 
-# Обработка URL базы данных для поддержки SSL
+logger.info(f"Initial DATABASE_URL: {DATABASE_URL}")
+
 def get_database_url():
     logger.info("Configuring database URL...")
-    
+    db_url = DATABASE_URL
+
     # Замена postgres:// на postgresql:// если необходимо
-    if DATABASE_URL.startswith("postgres://"):
-        db_url = DATABASE_URL.replace("postgres://", "postgresql://")
-    else:
-        db_url = DATABASE_URL
-    
-    # Добавляем SSL параметры
-    parsed_url = urllib.parse.urlparse(db_url)
-    query_params = urllib.parse.parse_qs(parsed_url.query) if parsed_url.query else {}
-    
-    # Добавляем параметры SSL только для Render.com
-    if os.getenv("RENDER") == "true":
-        logger.info("Adding SSL parameters for Render.com deployment")
-        query_params.update({
-            "sslmode": ["require"],
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://")
+        logger.info("Replaced postgres:// with postgresql:// in database URL")
+
+    # Добавляем параметры SSL для production
+    if "localhost" not in db_url:
+        parsed_url = urllib.parse.urlparse(db_url)
+        query_dict = dict(urllib.parse.parse_qsl(parsed_url.query))
+        
+        # Добавляем параметры SSL
+        query_dict.update({
+            "sslmode": "require"
         })
-    
-    new_query = urllib.parse.urlencode(query_params, doseq=True)
-    db_url = urllib.parse.urlunparse(
-        parsed_url._replace(query=new_query)
-    )
-    
-    # Логируем URL без чувствительных данных
-    safe_url = db_url.split('@')[0] + '@' + db_url.split('@')[1].split('?')[0]
-    logger.info(f"Database URL configured: {safe_url}")
+        
+        # Собираем URL обратно
+        query_string = urllib.parse.urlencode(query_dict)
+        db_url = urllib.parse.urlunparse(
+            (
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                parsed_url.params,
+                query_string,
+                parsed_url.fragment
+            )
+        )
+        logger.info("Added SSL parameters to database URL")
+
+    logger.info(f"Final database URL configuration: {db_url}")
     return db_url
 
 def create_db_engine(retries=5, delay=5):
-    last_exception = None
     for attempt in range(retries):
         try:
             logger.info(f"Attempting to create database engine (attempt {attempt + 1}/{retries})")
@@ -87,20 +69,20 @@ def create_db_engine(retries=5, delay=5):
                 }
             )
             
-            # Проверяем подключение
+            # Проверяем подключение с использованием text()
             with engine.connect() as connection:
-                connection.execute("SELECT 1")
-            logger.info("Database engine created successfully")
+                connection.execute(text("SELECT 1"))
+                connection.commit()
+            logger.info("Database engine created and connected successfully")
             return engine
         except Exception as e:
-            last_exception = e
-            logger.error(f"Failed to create database engine: {str(e)}")
+            logger.error(f"Failed to create database engine (attempt {attempt + 1}): {str(e)}")
             if attempt < retries - 1:
                 logger.info(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                logger.error("Max retries reached, raising last exception")
-                raise last_exception
+                logger.error("Max retries reached, raising exception")
+                raise
 
 engine = create_db_engine()
 
