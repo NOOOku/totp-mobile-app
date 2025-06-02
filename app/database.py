@@ -54,6 +54,7 @@ def get_database_url():
     return db_url
 
 def create_db_engine(retries=5, delay=5):
+    last_exception = None
     for attempt in range(retries):
         try:
             logger.info(f"Attempting to create database engine (attempt {attempt + 1}/{retries})")
@@ -71,28 +72,23 @@ def create_db_engine(retries=5, delay=5):
             
             # Проверяем подключение с использованием text()
             with engine.connect() as connection:
-                connection.execute(text("SELECT 1"))
+                result = connection.execute(text("SELECT 1"))
+                result.scalar()  # Получаем результат
                 connection.commit()
+            
             logger.info("Database engine created and connected successfully")
             return engine
         except Exception as e:
+            last_exception = e
             logger.error(f"Failed to create database engine (attempt {attempt + 1}): {str(e)}")
             if attempt < retries - 1:
                 logger.info(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
-                logger.error("Max retries reached, raising exception")
-                raise
+                logger.error("Max retries reached, raising last exception")
+                raise last_exception
 
 engine = create_db_engine()
-
-@event.listens_for(Engine, "connect")
-def connect(dbapi_connection, connection_record):
-    logger.info("New database connection established")
-
-@event.listens_for(Engine, "disconnect")
-def disconnect(dbapi_connection, connection_record):
-    logger.info("Database connection closed")
 
 SessionLocal = sessionmaker(
     autocommit=False,
