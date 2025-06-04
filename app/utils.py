@@ -53,7 +53,7 @@ def generate_totp_secret() -> tuple[str, str]:
         raise
 
 def verify_totp(secret: str, token: str) -> bool:
-    """Verify a TOTP token using expo-totp through Node.js."""
+    """Verify a TOTP token."""
     logger = logging.getLogger(__name__)
     try:
         logger.info(f"Verifying TOTP token. Secret: {secret}, Token: {token}")
@@ -67,46 +67,36 @@ def verify_totp(secret: str, token: str) -> bool:
             logger.error(f"Invalid token format. Token: {token}")
             return False
 
-        # Используем Node.js для проверки через expo-totp
-        import subprocess
-        import json
-        
-        # Создаем временный файл с данными
-        data = {
-            "secret": secret.strip().upper(),
-            "token": token
-        }
-        
-        # Запускаем Node.js скрипт
-        node_process = subprocess.Popen(
-            ["node", "-e", f"""
-            const {{ verifyTOTP }} = require('./app/totp_node.js');
-            const data = {json.dumps(data)};
-            
-            verifyTOTP(data.secret, data.token)
-                .then(result => console.log(JSON.stringify({{ isValid: result }})))
-                .catch(error => console.log(JSON.stringify({{ error: error.message }})));
-            """],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+        # Нормализуем секрет (убираем пробелы и переводим в верхний регистр)
+        normalized_secret = secret.strip().upper()
+        logger.info(f"Normalized secret: {normalized_secret}")
+
+        # Создаем TOTP объект с параметрами expo-totp
+        totp = pyotp.TOTP(
+            normalized_secret,
+            digits=6,        # expo-totp default
+            interval=30,     # expo-totp default
+            digest='sha1'    # expo-totp default
         )
         
-        # Получаем результат
-        stdout, stderr = node_process.communicate()
+        # Получаем текущее время
+        current_time = datetime.datetime.now()
+        logger.info(f"Current time: {current_time.timestamp()}")
         
-        if stderr:
-            logger.error(f"Node.js error: {stderr.decode()}")
-            return False
-            
-        try:
-            result = json.loads(stdout.decode())
-            is_valid = result.get('isValid', False)
-            logger.info(f"TOTP verification result: {is_valid}")
-            return is_valid
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse Node.js output: {stdout.decode()}")
-            return False
-            
+        # Получаем текущий код для сравнения
+        current_code = totp.now()
+        logger.info(f"Current TOTP code: {current_code}, Provided token: {token}")
+        
+        # Получаем коды для соседних интервалов для отладки
+        prev_code = totp.at(current_time - datetime.timedelta(seconds=30))
+        next_code = totp.at(current_time + datetime.timedelta(seconds=30))
+        logger.info(f"Previous code: {prev_code}, Next code: {next_code}")
+        
+        # Проверяем код с окном в 1 интервал (30 секунд до и после)
+        is_valid = totp.verify(token, valid_window=1)
+        logger.info(f"TOTP verification result: {is_valid}")
+        
+        return is_valid
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
         return False 
