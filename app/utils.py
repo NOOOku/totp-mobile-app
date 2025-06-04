@@ -56,7 +56,7 @@ def verify_totp(secret: str, token: str) -> bool:
     """Verify a TOTP token."""
     logger = logging.getLogger(__name__)
     try:
-        logger.info(f"Verifying TOTP token. Secret length: {len(secret)}, Token: {token}")
+        logger.info(f"Verifying TOTP token. Secret: {secret}, Token: {token}")
         
         # Проверяем формат секрета и токена
         if not secret or not token:
@@ -70,9 +70,18 @@ def verify_totp(secret: str, token: str) -> bool:
         # Создаем TOTP объект с теми же параметрами, что и в мобильном приложении
         totp = pyotp.TOTP(secret, digits=6, interval=30, digest='sha1')
         
+        # Получаем текущее время
+        current_time = datetime.datetime.now()
+        logger.info(f"Current time: {current_time.timestamp()}")
+        
         # Получаем текущий код для сравнения
         current_code = totp.now()
         logger.info(f"Current TOTP code: {current_code}, Provided token: {token}")
+        
+        # Получаем коды для соседних интервалов
+        prev_code = totp.at(current_time - datetime.timedelta(seconds=30))
+        next_code = totp.at(current_time + datetime.timedelta(seconds=30))
+        logger.info(f"Previous code: {prev_code}, Next code: {next_code}")
         
         # Проверяем код с окном в 1 интервал
         is_valid = totp.verify(token, valid_window=1)

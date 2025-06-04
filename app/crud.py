@@ -56,20 +56,20 @@ def create_user_totp(db: Session, user_id: int) -> models.TOTPSecret:
     """Создает TOTP секрет для пользователя."""
     try:
         logger.info(f"Создание TOTP секрета для пользователя {user_id}")
-        full_secret, short_secret = utils.generate_totp_secret()
+    full_secret, short_secret = utils.generate_totp_secret()
         logger.info(f"Сгенерирован короткий ключ: {short_secret}")
         
-        db_totp = models.TOTPSecret(
-            user_id=user_id,
-            secret=full_secret,
-            short_secret=short_secret,
-            is_verified=False
-        )
-        db.add(db_totp)
-        db.commit()
-        db.refresh(db_totp)
+    db_totp = models.TOTPSecret(
+        user_id=user_id,
+        secret=full_secret,
+        short_secret=short_secret,
+        is_verified=False
+    )
+    db.add(db_totp)
+    db.commit()
+    db.refresh(db_totp)
         logger.info(f"TOTP секрет успешно сохранен в базе данных")
-        return db_totp
+    return db_totp
     except SQLAlchemyError as e:
         logger.error(f"Ошибка при создании TOTP секрета: {str(e)}")
         db.rollback()
