@@ -2,7 +2,6 @@ from passlib.context import CryptContext
 import datetime
 from typing import Union
 from jose import JWTError, jwt
-from pyotp.random import random_base32
 import pyotp
 import secrets
 import os
