@@ -54,9 +54,31 @@ def generate_totp_secret() -> tuple[str, str]:
 
 def verify_totp(secret: str, token: str) -> bool:
     """Verify a TOTP token."""
+    logger = logging.getLogger(__name__)
     try:
+        logger.info(f"Verifying TOTP token. Secret length: {len(secret)}, Token: {token}")
+        
+        # Проверяем формат секрета и токена
+        if not secret or not token:
+            logger.error("Secret or token is empty")
+            return False
+            
+        if not token.isdigit() or len(token) != 6:
+            logger.error(f"Invalid token format. Token: {token}")
+            return False
+
+        # Создаем TOTP объект с теми же параметрами, что и в мобильном приложении
         totp = pyotp.TOTP(secret, digits=6, interval=30, digest='sha1')
-        return totp.verify(token, valid_window=1)  # Allow 1 step time drift
+        
+        # Получаем текущий код для сравнения
+        current_code = totp.now()
+        logger.info(f"Current TOTP code: {current_code}, Provided token: {token}")
+        
+        # Проверяем код с окном в 1 интервал
+        is_valid = totp.verify(token, valid_window=1)
+        logger.info(f"TOTP verification result: {is_valid}")
+        
+        return is_valid
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
         return False 
