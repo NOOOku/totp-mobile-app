@@ -2,6 +2,7 @@ from passlib.context import CryptContext
 import datetime
 from typing import Union
 from jose import JWTError, jwt
+from pyotp.random import random_base32
 import pyotp
 import secrets
 import os
@@ -38,6 +39,11 @@ def generate_short_secret() -> str:
     length = 6
     return ''.join(secrets.choice(ALLOWED_CHARS) for _ in range(length))
 
+def generate_base32_secret(length: int = 32) -> str:
+    """Generate a random base32 secret of specified length."""
+    ALLOWED_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"  # Base32 alphabet
+    return ''.join(secrets.choice(ALLOWED_CHARS) for _ in range(length))
+
 def generate_totp_secret() -> tuple[str, str]:
     """Generate a random TOTP secret and its short version.
     
@@ -46,8 +52,8 @@ def generate_totp_secret() -> tuple[str, str]:
     """
     logger = logging.getLogger(__name__)
     try:
-        # Generate a random secret using pyotp
-        full_secret = pyotp.random_base32()
+        # Generate a random base32 secret
+        full_secret = generate_base32_secret(32)
         
         # Generate short key
         short_secret = generate_short_secret()
