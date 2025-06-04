@@ -6,7 +6,7 @@ from ..database import get_db
 from pydantic import BaseModel
 import logging
 from typing import Optional, Dict
-import jwt
+from jose import jwt, JWTError
 from datetime import timedelta
 
 logger = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ async def mobile_login(
             "full_secret": totp_secret.secret,
             "user_id": user.id
         }
-    except jwt.JWTError as e:
+    except JWTError as e:
         logger.error(f"Ошибка при декодировании JWT: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
