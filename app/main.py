@@ -171,10 +171,4 @@ async def verify_totp(
         detail="Invalid TOTP code",
     )
 
-@app.get("/server-time")
-async def get_server_time():
-    """
-    Возвращает текущее время сервера в формате Unix timestamp
-    """
-    current_time = datetime.datetime.now().timestamp()
-    return {"server_time": current_time} 
+# Удаляем старый эндпоинт server-time, так как теперь используется /time/server-time 
