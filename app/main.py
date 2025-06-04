@@ -10,6 +10,7 @@ import logging
 from typing import Annotated
 from sqlalchemy.exc import SQLAlchemyError
 from .routers import auth
+import datetime
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -156,4 +157,12 @@ async def verify_totp(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid TOTP code",
-    ) 
+    )
+
+@app.get("/server-time")
+async def get_server_time():
+    """
+    Возвращает текущее время сервера в формате Unix timestamp
+    """
+    current_time = datetime.datetime.now().timestamp()
+    return {"server_time": current_time} 
