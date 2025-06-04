@@ -1,0 +1,9 @@
+{
+  "name": "totp-backend",
+  "version": "1.0.0",
+  "description": "TOTP backend using otplib",
+  "main": "app/totp_node.js",
+  "dependencies": {
+    "otplib": "^12.0.1"
+  }
+} 
