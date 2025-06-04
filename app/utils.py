@@ -7,6 +7,7 @@ import secrets
 import os
 import logging
 import re
+import time
 
 # JWT configuration
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
@@ -96,6 +97,12 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
             logger.error(f"Invalid base32 secret: {e}")
             return False
 
+        # Логируем конфигурацию TOTP
+        logger.info("TOTP Configuration:")
+        logger.info("- Digits: 6")
+        logger.info("- Interval: 30")
+        logger.info("- Algorithm: sha1")
+
         # Создаем TOTP объект с параметрами otplib
         totp = pyotp.TOTP(
             normalized_secret,
@@ -104,37 +111,24 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
             digest='sha1'
         )
         
-        logger.info("TOTP Configuration:")
-        logger.info(f"- Digits: {totp.digits}")
-        logger.info(f"- Interval: {totp.interval}")
-        logger.info(f"- Algorithm: {totp.digest}")
+        # Получаем текущее время в секундах
+        current_timestamp = timestamp if timestamp is not None else int(time.time())
+        logger.info(f"Using current time: {current_timestamp}")
         
-        # Если передан timestamp, используем его для проверки
-        if timestamp is not None:
-            current_time = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
-            logger.info(f"Using provided timestamp: {timestamp}")
-            logger.info(f"Converted to UTC: {current_time.isoformat()}")
-            time_counter = int(timestamp / totp.interval)
-            logger.info(f"Time counter (T0): {time_counter}")
-            # Увеличиваем окно проверки до 2 (±1 интервал) для компенсации задержек
-            is_valid = totp.verify(token, for_time=timestamp, valid_window=2)
-        else:
-            # Получаем текущее время
-            current_time = datetime.datetime.now(datetime.timezone.utc)
-            current_timestamp = int(current_time.timestamp())
-            logger.info(f"Using current time: {current_timestamp}")
-            logger.info(f"Converted to UTC: {current_time.isoformat()}")
-            time_counter = int(current_timestamp / totp.interval)
-            logger.info(f"Time counter (T0): {time_counter}")
-            # Увеличиваем окно проверки до 2 (±1 интервал) для компенсации задержек
-            is_valid = totp.verify(token, valid_window=2)
+        # Конвертируем в UTC для логирования
+        current_time = datetime.datetime.fromtimestamp(current_timestamp, tz=datetime.timezone.utc)
+        logger.info(f"Converted to UTC: {current_time.isoformat()}")
         
-        # Генерируем код тем же способом, что и клиент для отладки
-        current_code = totp.at(current_time)
+        # Вычисляем T0 (количество 30-секундных интервалов)
+        time_counter = int(current_timestamp / 30)
+        logger.info(f"Time counter (T0): {time_counter}")
+        
+        # Генерируем текущий код
+        current_code = totp.at(current_timestamp)
         logger.info(f"Generated TOTP code: {current_code}")
         logger.info(f"Provided token: {token}")
         
-        # Получаем коды для соседних интервалов для отладки
+        # Генерируем коды для соседних интервалов
         prev_time = current_time - datetime.timedelta(seconds=30)
         next_time = current_time + datetime.timedelta(seconds=30)
         prev_code = totp.at(prev_time)
@@ -142,11 +136,13 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         logger.info(f"Previous interval ({prev_time.isoformat()}): {prev_code}")
         logger.info(f"Next interval ({next_time.isoformat()}): {next_code}")
         
+        # Проверяем код с расширенным окном
+        is_valid = totp.verify(token, for_time=current_timestamp, valid_window=2)
         logger.info(f"Verification result: {is_valid}")
         logger.info("=== End Debug Info ===")
+        
         return is_valid
         
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
-        logger.error(f"Stack trace:", exc_info=True)
         return False 
