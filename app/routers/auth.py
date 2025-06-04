@@ -194,32 +194,37 @@ async def login(
         )
 
     # Проверка TOTP кода
-    if not user.totp_secret or not user.totp_secret.is_verified:
+    if not user.totp_secret:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="TOTP не настроен для этого пользователя"
         )
 
-    if not utils.verify_totp(user.totp_secret.secret, totp_code):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный код аутентификации"
+    if utils.verify_totp(user.totp_secret.secret, totp_code):
+        # Если код верный и секрет еще не верифицирован, верифицируем его
+        if not user.totp_secret.is_verified:
+            crud.verify_user_totp(db, user.id)
+            logger.info(f"TOTP secret verified for user {user.username}")
+
+        # Генерация токена доступа
+        access_token_expires = timedelta(minutes=utils.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = utils.create_access_token(
+            data={"sub": user.username},
+            expires_delta=access_token_expires
         )
 
-    # Генерация токена доступа
-    access_token_expires = timedelta(minutes=utils.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = utils.create_access_token(
-        data={"sub": user.username},
-        expires_delta=access_token_expires
-    )
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_active": user.is_active
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_active": user.is_active
+            }
         }
-    } 
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Неверный код аутентификации"
+    ) 

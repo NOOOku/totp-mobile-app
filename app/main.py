@@ -147,7 +147,10 @@ async def verify_totp(
         )
     
     if utils.verify_totp(user.totp_secret.secret, totp_code):
-        crud.verify_user_totp(db, user.id)
+        # Если код верный и секрет еще не верифицирован, верифицируем его
+        if not user.totp_secret.is_verified:
+            crud.verify_user_totp(db, user.id)
+            logger.info(f"TOTP secret verified for user {user.username}")
         return {"message": "TOTP verified successfully"}
     
     raise HTTPException(
