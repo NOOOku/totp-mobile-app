@@ -110,7 +110,7 @@ async def mobile_login(
         
         # Получаем TOTP секрет пользователя
         totp_secret = crud.get_totp_by_user_id(db, user.id)
-    if not totp_secret:
+        if not totp_secret:
             logger.error(f"Не найден TOTP секрет для пользователя: {user.id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -138,7 +138,7 @@ async def mobile_login(
         )
     except Exception as e:
         logger.error(f"Ошибка при обработке запроса: {str(e)}")
-        raise 
+        raise
 
 @router.post("/verify-credentials")
 async def verify_credentials(
