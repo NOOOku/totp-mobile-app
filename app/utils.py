@@ -54,5 +54,9 @@ def generate_totp_secret() -> tuple[str, str]:
 
 def verify_totp(secret: str, token: str) -> bool:
     """Verify a TOTP token."""
-    totp = pyotp.TOTP(secret)
-    return totp.verify(token) 
+    try:
+        totp = pyotp.TOTP(secret, digits=6, interval=30, digest='sha1')
+        return totp.verify(token, valid_window=1)  # Allow 1 step time drift
+    except Exception as e:
+        logger.error(f"Error verifying TOTP: {str(e)}")
+        return False 
