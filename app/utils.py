@@ -5,6 +5,7 @@ from jose import JWTError, jwt
 import pyotp
 import secrets
 import os
+import logging
 
 # Конфигурация для JWT
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))  # Генерируем безопасный ключ
@@ -29,15 +30,33 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+def generate_short_secret() -> str:
+    """Генерирует короткий секретный ключ.
+    Использует только буквы и цифры, которые легко различить.
+    Исключает похожие символы (0/O, 1/I/L, etc.)
+    """
+    # Используем только хорошо различимые символы
+    ALLOWED_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+    length = 6
+    return ''.join(secrets.choice(ALLOWED_CHARS) for _ in range(length))
+
 def generate_totp_secret() -> tuple[str, str]:
     """Генерирует случайный секрет для TOTP и его короткую версию.
     
     Returns:
         tuple[str, str]: (полный_секрет, короткий_секрет)
     """
+    logger = logging.getLogger(__name__)
+    
+    try:
     full_secret = pyotp.random_base32()
-    short_secret = full_secret[:6]  # Берем первые 6 символов как короткий ключ
+        # Генерируем отдельный короткий ключ
+        short_secret = generate_short_secret()
+        logger.info(f"Сгенерирован новый TOTP секрет. Короткий ключ: {short_secret}, Полный ключ: {full_secret}")
     return full_secret, short_secret
+    except Exception as e:
+        logger.error(f"Ошибка при генерации TOTP секрета: {str(e)}")
+        raise
 
 def verify_totp(secret: str, token: str) -> bool:
     """Проверяет TOTP токен."""

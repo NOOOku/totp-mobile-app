@@ -54,7 +54,11 @@ def create_user(db: Session, user: schemas.UserCreate):
 
 def create_user_totp(db: Session, user_id: int) -> models.TOTPSecret:
     """Создает TOTP секрет для пользователя."""
+    try:
+        logger.info(f"Создание TOTP секрета для пользователя {user_id}")
     full_secret, short_secret = utils.generate_totp_secret()
+        logger.info(f"Сгенерирован короткий ключ: {short_secret}")
+        
     db_totp = models.TOTPSecret(
         user_id=user_id,
         secret=full_secret,
@@ -64,11 +68,40 @@ def create_user_totp(db: Session, user_id: int) -> models.TOTPSecret:
     db.add(db_totp)
     db.commit()
     db.refresh(db_totp)
+        logger.info(f"TOTP секрет успешно сохранен в базе данных")
     return db_totp
+    except SQLAlchemyError as e:
+        logger.error(f"Ошибка при создании TOTP секрета: {str(e)}")
+        db.rollback()
+        raise
 
 def get_totp_by_short_secret(db: Session, short_secret: str) -> models.TOTPSecret:
     """Получает TOTP секрет по короткому ключу."""
-    return db.query(models.TOTPSecret).filter(models.TOTPSecret.short_secret == short_secret).first()
+    try:
+        # Нормализуем короткий ключ: убираем пробелы и приводим к верхнему регистру
+        normalized_secret = short_secret.strip().upper()
+        logger.info(f"Поиск TOTP секрета. Оригинальный ключ: {short_secret}, нормализованный ключ: {normalized_secret}")
+        
+        # Ищем точное совпадение
+        totp_secret = db.query(models.TOTPSecret).filter(
+            models.TOTPSecret.short_secret == normalized_secret
+        ).first()
+        
+        if totp_secret:
+            logger.info(f"Найден TOTP секрет для пользователя {totp_secret.user_id}")
+            return totp_secret
+        
+        # Если точное совпадение не найдено, выводим все секреты для отладки
+        all_secrets = db.query(models.TOTPSecret).all()
+        logger.info("Все доступные секреты в базе данных:")
+        for secret in all_secrets:
+            logger.info(f"ID пользователя: {secret.user_id}, Короткий ключ: {secret.short_secret}")
+        
+        logger.error(f"TOTP секрет не найден для ключа {normalized_secret}")
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при поиске TOTP секрета: {str(e)}")
+        raise
 
 def verify_user_totp(db: Session, user_id: int):
     try:
@@ -100,4 +133,27 @@ def authenticate_user(db: Session, username: str, password: str):
         return user
     except SQLAlchemyError as e:
         logger.error(f"Database error in authenticate_user: {str(e)}")
+        raise
+
+def get_totp_by_user_id(db: Session, user_id: int) -> models.TOTPSecret:
+    """
+    Получает TOTP секрет по ID пользователя
+    """
+    try:
+        logger.info(f"Поиск TOTP секрета для пользователя {user_id}")
+        totp_secret = db.query(models.TOTPSecret).filter(models.TOTPSecret.user_id == user_id).first()
+        
+        if totp_secret:
+            logger.info(f"Найден TOTP секрет: short_secret={totp_secret.short_secret}, full_secret={totp_secret.secret}")
+        else:
+            # Выводим все секреты для отладки
+            all_secrets = db.query(models.TOTPSecret).all()
+            logger.info("Все доступные секреты в базе данных:")
+            for secret in all_secrets:
+                logger.info(f"ID пользователя: {secret.user_id}, Короткий ключ: {secret.short_secret}")
+            logger.error(f"TOTP секрет не найден для пользователя {user_id}")
+            
+        return totp_secret
+    except Exception as e:
+        logger.error(f"Ошибка при поиске TOTP секрета: {str(e)}")
         raise 

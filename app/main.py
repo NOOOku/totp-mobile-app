@@ -9,6 +9,7 @@ from .database import SessionLocal, engine
 import logging
 from typing import Annotated
 from sqlalchemy.exc import SQLAlchemyError
+from .routers import auth
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -16,47 +17,19 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-
-@app.get("/")
-def root():
-    return {"status": "ok"}
-
-
-# Настройка CORS
+# Добавляем CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене замените на конкретные домены
+    allow_origins=["*"],  # Разрешаем все источники
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Разрешаем все методы
+    allow_headers=["*"],  # Разрешаем все заголовки
 )
 
-# Обработка ошибок
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Global error: {str(exc)}")
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc)}
-    )
+# Подключаем маршрутизатор аутентификации
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
-    response = await call_next(request)
-    if request.headers.get("origin") in ["http://localhost:3000", "http://127.0.0.1:3000"]:
-        response.headers["Access-Control-Allow-Origin"] = request.headers["origin"]
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
-
-# Проверка работоспособности API
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
-
-# Создаем таблицы при запуске
-models.Base.metadata.create_all(bind=engine)
-
-# Dependency
+# Получение соединения с базой данных
 def get_db():
     db = SessionLocal()
     try:
@@ -64,7 +37,11 @@ def get_db():
     finally:
         db.close()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")  # Обновляем путь к токену
 
 @app.post("/auth/register", response_model=schemas.User)
 async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -131,51 +108,6 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
             status_code=500,
             detail=str(e)
         )
-
-@app.post("/auth/token", response_model=schemas.Token)
-async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
-):
-    logger.info(f"Login attempt for user: {form_data.username}")
-    logger.info(f"Received form data: username={form_data.username}, password_length={len(form_data.password)}")
-    logger.info(f"TOTP code present: {'totp_code' in form_data.__dict__}")
-    
-    user = crud.authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        logger.info(f"Authentication failed for user: {form_data.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    logger.info(f"User authenticated successfully: {form_data.username}")
-    # Проверяем TOTP код, если пользователь уже настроил 2FA
-    if user.totp_secret and user.totp_secret.is_verified:
-        logger.info(f"TOTP verification required for user: {form_data.username}")
-        totp_code = getattr(form_data, 'totp_code', None)
-        if not totp_code:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="TOTP code required",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        if not utils.verify_totp(user.totp_secret.secret, totp_code):
-            logger.info(f"TOTP verification failed for user: {form_data.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid TOTP code",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        logger.info(f"TOTP verified successfully for user: {form_data.username}")
-
-    access_token_expires = timedelta(minutes=utils.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = utils.create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    logger.info(f"Access token generated for user: {form_data.username}")
-    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/auth/verify-totp")
 async def verify_totp(
