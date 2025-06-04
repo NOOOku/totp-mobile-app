@@ -1,13 +1,15 @@
 from fastapi import APIRouter
 import datetime
+import time
 
 router = APIRouter()
 
 @router.get("/server-time")
 async def get_server_time():
     """Get current server time in UTC timestamp format"""
-    current_time = datetime.datetime.now(datetime.timezone.utc)
+    current_timestamp = int(time.time())
+    current_time = datetime.datetime.fromtimestamp(current_timestamp, tz=datetime.timezone.utc)
     return {
-        "timestamp": int(current_time.timestamp()),
+        "timestamp": current_timestamp,
         "utc_time": current_time.isoformat()
     } 
