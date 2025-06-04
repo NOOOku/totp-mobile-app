@@ -54,9 +54,12 @@ def generate_totp_secret() -> tuple[str, str]:
         raise
 
 def normalize_base32_secret(secret: str) -> str:
-    """Нормализует и валидирует base32 секрет: только A-Z и 2-7, без пробелов, в верхнем регистре."""
-    normalized = ''.join(secret.strip().upper().split())
-    if not re.fullmatch(r'[A-Z2-7]+', normalized):
+    """
+    Нормализует и валидирует base32 секрет: только A-Z и 2-7, без пробелов, в верхнем регистре.
+    Идентична клиентской реализации.
+    """
+    normalized = re.sub(r'\s+', '', secret.strip().upper())
+    if not re.match(r'^[A-Z2-7]+$', normalized):
         raise ValueError('Secret is not valid base32 (A-Z, 2-7 only)')
     return normalized
 
@@ -70,7 +73,10 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
     """
     logger = logging.getLogger(__name__)
     try:
-        logger.info(f"Verifying TOTP token. Secret: {secret}, Token: {token}, Timestamp: {timestamp}")
+        logger.info("=== TOTP Verification Debug Info ===")
+        logger.info(f"Input secret: {secret}")
+        logger.info(f"Input token: {token}")
+        logger.info(f"Input timestamp: {timestamp}")
         
         # Проверяем формат секрета и токена
         if not secret or not token:
@@ -84,42 +90,63 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         # Строго нормализуем и валидируем секрет
         try:
             normalized_secret = normalize_base32_secret(secret)
+            logger.info(f"Normalized secret: {normalized_secret}")
+            logger.info(f"Secret length: {len(normalized_secret)}")
         except Exception as e:
             logger.error(f"Invalid base32 secret: {e}")
             return False
-        logger.info(f"Normalized secret: {normalized_secret}")
 
         # Создаем TOTP объект с параметрами otplib
         totp = pyotp.TOTP(
             normalized_secret,
-            digits=6,        # otplib default
-            interval=30,     # otplib default
-            digest='sha1'    # otplib использует sha1 в нижнем регистре
+            digits=6,
+            interval=30,
+            digest='sha1'
         )
+        
+        logger.info("TOTP Configuration:")
+        logger.info(f"- Digits: {totp.digits}")
+        logger.info(f"- Interval: {totp.interval}")
+        logger.info(f"- Algorithm: {totp.digest}")
         
         # Если передан timestamp, используем его для проверки
         if timestamp is not None:
             current_time = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
-            logger.info(f"Using provided timestamp: {timestamp} ({current_time.isoformat()})")
-            is_valid = totp.verify(token, for_time=timestamp, valid_window=1)
+            logger.info(f"Using provided timestamp: {timestamp}")
+            logger.info(f"Converted to UTC: {current_time.isoformat()}")
+            time_counter = int(timestamp / totp.interval)
+            logger.info(f"Time counter (T0): {time_counter}")
+            # Увеличиваем окно проверки до 2 (±1 интервал) для компенсации задержек
+            is_valid = totp.verify(token, for_time=timestamp, valid_window=2)
         else:
             # Получаем текущее время
             current_time = datetime.datetime.now(datetime.timezone.utc)
-            logger.info(f"Using current time: {current_time.timestamp()} ({current_time.isoformat()})")
-            is_valid = totp.verify(token, valid_window=1)
+            current_timestamp = int(current_time.timestamp())
+            logger.info(f"Using current time: {current_timestamp}")
+            logger.info(f"Converted to UTC: {current_time.isoformat()}")
+            time_counter = int(current_timestamp / totp.interval)
+            logger.info(f"Time counter (T0): {time_counter}")
+            # Увеличиваем окно проверки до 2 (±1 интервал) для компенсации задержек
+            is_valid = totp.verify(token, valid_window=2)
         
-        # Получаем текущий код для сравнения
+        # Генерируем код тем же способом, что и клиент для отладки
         current_code = totp.at(current_time)
-        logger.info(f"Current TOTP code: {current_code}, Provided token: {token}")
+        logger.info(f"Generated TOTP code: {current_code}")
+        logger.info(f"Provided token: {token}")
         
         # Получаем коды для соседних интервалов для отладки
-        prev_code = totp.at(current_time - datetime.timedelta(seconds=30))
-        next_code = totp.at(current_time + datetime.timedelta(seconds=30))
-        logger.info(f"Previous code: {prev_code}, Next code: {next_code}")
+        prev_time = current_time - datetime.timedelta(seconds=30)
+        next_time = current_time + datetime.timedelta(seconds=30)
+        prev_code = totp.at(prev_time)
+        next_code = totp.at(next_time)
+        logger.info(f"Previous interval ({prev_time.isoformat()}): {prev_code}")
+        logger.info(f"Next interval ({next_time.isoformat()}): {next_code}")
         
-        logger.info(f"TOTP verification result: {is_valid}")
+        logger.info(f"Verification result: {is_valid}")
+        logger.info("=== End Debug Info ===")
         return is_valid
         
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
+        logger.error(f"Stack trace:", exc_info=True)
         return False 
