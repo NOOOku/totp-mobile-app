@@ -46,9 +46,28 @@ def generate_totp_secret() -> tuple[str, str]:
     """
     logger = logging.getLogger(__name__)
     try:
+        # Создаем новый TOTP объект с правильными параметрами
         full_secret = pyotp.random_base32()
+        totp = pyotp.TOTP(
+            full_secret,
+            digits=6,
+            interval=30,
+            digest='sha1'
+        )
+        
+        # Генерируем короткий ключ
         short_secret = generate_short_secret()
-        logger.info(f"Generated new TOTP secret. Short key: {short_secret}, Full key: {full_secret}")
+        
+        # Создаем URI для QR кода (для совместимости с Google Authenticator)
+        totp_uri = totp.provisioning_uri(
+            name="TOTP App",
+            issuer_name="Your App"
+        )
+        
+        logger.info(f"Generated new TOTP secret. Short key: {short_secret}")
+        logger.info(f"Full key: {full_secret}")
+        logger.info(f"TOTP URI: {totp_uri}")
+        
         return full_secret, short_secret
     except Exception as e:
         logger.error(f"Error generating TOTP secret: {str(e)}")
@@ -103,7 +122,7 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         logger.info("- Interval: 30")
         logger.info("- Algorithm: sha1")
 
-        # Создаем TOTP объект с параметрами otplib
+        # Создаем TOTP объект с теми же параметрами, что и при генерации
         totp = pyotp.TOTP(
             normalized_secret,
             digits=6,
@@ -129,15 +148,15 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         logger.info(f"Provided token: {token}")
         
         # Генерируем коды для соседних интервалов
-        prev_time = current_time - datetime.timedelta(seconds=30)
-        next_time = current_time + datetime.timedelta(seconds=30)
+        prev_time = current_timestamp - 30
+        next_time = current_timestamp + 30
         prev_code = totp.at(prev_time)
         next_code = totp.at(next_time)
-        logger.info(f"Previous interval ({prev_time.isoformat()}): {prev_code}")
-        logger.info(f"Next interval ({next_time.isoformat()}): {next_code}")
+        logger.info(f"Previous interval code: {prev_code}")
+        logger.info(f"Next interval code: {next_code}")
         
         # Проверяем код с расширенным окном
-        is_valid = totp.verify(token, for_time=current_timestamp, valid_window=2)
+        is_valid = totp.verify(token, valid_window=2)
         logger.info(f"Verification result: {is_valid}")
         logger.info("=== End Debug Info ===")
         
