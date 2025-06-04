@@ -2,7 +2,7 @@ from passlib.context import CryptContext
 import datetime
 from typing import Union
 from jose import JWTError, jwt
-import pyotp
+from pyotp import TOTP
 import secrets
 import os
 import logging
@@ -58,7 +58,7 @@ def generate_totp_secret() -> tuple[str, str]:
         short_secret = generate_short_secret()
         
         # Create TOTP object with proper parameters
-        totp = pyotp.TOTP(
+        totp = TOTP(
             full_secret,
             digits=6,
             interval=30,
@@ -130,7 +130,7 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         logger.info("- Algorithm: sha1")
 
         # Создаем TOTP объект с теми же параметрами, что и при генерации
-        totp = pyotp.TOTP(
+        totp = TOTP(
             normalized_secret,
             digits=6,
             interval=30,
