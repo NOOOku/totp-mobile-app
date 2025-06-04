@@ -46,8 +46,10 @@ def generate_totp_secret() -> tuple[str, str]:
     """
     logger = logging.getLogger(__name__)
     try:
-        # Создаем новый TOTP объект с правильными параметрами
-        full_secret = pyotp.random_base32()
+        # Создаем случайный секрет используя pyotp
+        full_secret = pyotp.random_base32()  # Теперь это вызов функции
+        
+        # Создаем TOTP объект с правильными параметрами
         totp = pyotp.TOTP(
             full_secret,
             digits=6,
