@@ -46,10 +46,13 @@ def generate_totp_secret() -> tuple[str, str]:
     """
     logger = logging.getLogger(__name__)
     try:
-        # Создаем случайный секрет используя pyotp
-        full_secret = pyotp.random_base32()  # Теперь это вызов функции
+        # Generate a random secret using pyotp
+        full_secret = pyotp.random_base32()
         
-        # Создаем TOTP объект с правильными параметрами
+        # Generate short key
+        short_secret = generate_short_secret()
+        
+        # Create TOTP object with proper parameters
         totp = pyotp.TOTP(
             full_secret,
             digits=6,
@@ -57,10 +60,7 @@ def generate_totp_secret() -> tuple[str, str]:
             digest='sha1'
         )
         
-        # Генерируем короткий ключ
-        short_secret = generate_short_secret()
-        
-        # Создаем URI для QR кода (для совместимости с Google Authenticator)
+        # Create URI for QR code (for Google Authenticator compatibility)
         totp_uri = totp.provisioning_uri(
             name="TOTP App",
             issuer_name="Your App"
