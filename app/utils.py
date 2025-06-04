@@ -7,8 +7,8 @@ import secrets
 import os
 import logging
 
-# Конфигурация для JWT
-SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))  # Генерируем безопасный ключ
+# JWT configuration
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -31,34 +31,28 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     return encoded_jwt
 
 def generate_short_secret() -> str:
-    """Генерирует короткий секретный ключ.
-    Использует только буквы и цифры, которые легко различить.
-    Исключает похожие символы (0/O, 1/I/L, etc.)
-    """
-    # Используем только хорошо различимые символы
+    """Generate a short secret key using easily distinguishable characters."""
     ALLOWED_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
     length = 6
     return ''.join(secrets.choice(ALLOWED_CHARS) for _ in range(length))
 
 def generate_totp_secret() -> tuple[str, str]:
-    """Генерирует случайный секрет для TOTP и его короткую версию.
+    """Generate a random TOTP secret and its short version.
     
     Returns:
-        tuple[str, str]: (полный_секрет, короткий_секрет)
+        tuple[str, str]: (full_secret, short_secret)
     """
     logger = logging.getLogger(__name__)
-    
     try:
-    full_secret = pyotp.random_base32()
-        # Генерируем отдельный короткий ключ
+        full_secret = pyotp.random_base32()
         short_secret = generate_short_secret()
-        logger.info(f"Сгенерирован новый TOTP секрет. Короткий ключ: {short_secret}, Полный ключ: {full_secret}")
-    return full_secret, short_secret
+        logger.info(f"Generated new TOTP secret. Short key: {short_secret}, Full key: {full_secret}")
+        return full_secret, short_secret
     except Exception as e:
-        logger.error(f"Ошибка при генерации TOTP секрета: {str(e)}")
+        logger.error(f"Error generating TOTP secret: {str(e)}")
         raise
 
 def verify_totp(secret: str, token: str) -> bool:
-    """Проверяет TOTP токен."""
+    """Verify a TOTP token."""
     totp = pyotp.TOTP(secret)
     return totp.verify(token) 
