@@ -9,7 +9,7 @@ from .database import SessionLocal, engine
 import logging
 from typing import Annotated
 from sqlalchemy.exc import SQLAlchemyError
-from .routers import auth
+from .routers import auth, time_sync
 import datetime
 
 # Настройка логирования
@@ -31,8 +31,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключаем маршрутизатор аутентификации
+# Подключаем маршрутизаторы
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(time_sync.router, prefix="/time", tags=["time"])
 
 # Получение соединения с базой данных
 def get_db():
@@ -116,11 +117,22 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
 
 @app.post("/auth/verify-totp")
 async def verify_totp(
-    totp_code: str,
+    request: Request,
     db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
 ):
     try:
+        # Получаем данные из тела запроса
+        data = await request.json()
+        totp_code = data.get("totp_code")
+        client_timestamp = data.get("timestamp")  # Получаем timestamp от клиента
+        
+        if not totp_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TOTP code is required",
+            )
+        
         payload = utils.jwt.decode(token, utils.SECRET_KEY, algorithms=[utils.ALGORITHM])
         username = payload.get("sub")
         if username is None:
@@ -147,7 +159,7 @@ async def verify_totp(
             detail="TOTP not set up for this user",
         )
     
-    if utils.verify_totp(user.totp_secret.secret, totp_code):
+    if utils.verify_totp(user.totp_secret.secret, totp_code, timestamp=client_timestamp):
         # Если код верный и секрет еще не верифицирован, верифицируем его
         if not user.totp_secret.is_verified:
             crud.verify_user_totp(db, user.id)

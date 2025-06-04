@@ -6,6 +6,7 @@ import pyotp
 import secrets
 import os
 import logging
+import re
 
 # JWT configuration
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
@@ -52,11 +53,24 @@ def generate_totp_secret() -> tuple[str, str]:
         logger.error(f"Error generating TOTP secret: {str(e)}")
         raise
 
-def verify_totp(secret: str, token: str) -> bool:
-    """Verify a TOTP token."""
+def normalize_base32_secret(secret: str) -> str:
+    """Нормализует и валидирует base32 секрет: только A-Z и 2-7, без пробелов, в верхнем регистре."""
+    normalized = ''.join(secret.strip().upper().split())
+    if not re.fullmatch(r'[A-Z2-7]+', normalized):
+        raise ValueError('Secret is not valid base32 (A-Z, 2-7 only)')
+    return normalized
+
+def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
+    """Verify a TOTP token.
+    
+    Args:
+        secret: The TOTP secret key
+        token: The TOTP token to verify
+        timestamp: Optional timestamp to use for verification (for handling time drift)
+    """
     logger = logging.getLogger(__name__)
     try:
-        logger.info(f"Verifying TOTP token. Secret: {secret}, Token: {token}")
+        logger.info(f"Verifying TOTP token. Secret: {secret}, Token: {token}, Timestamp: {timestamp}")
         
         # Проверяем формат секрета и токена
         if not secret or not token:
@@ -67,24 +81,35 @@ def verify_totp(secret: str, token: str) -> bool:
             logger.error(f"Invalid token format. Token: {token}")
             return False
 
-        # Нормализуем секрет (убираем пробелы и переводим в верхний регистр)
-        normalized_secret = secret.strip().upper()
+        # Строго нормализуем и валидируем секрет
+        try:
+            normalized_secret = normalize_base32_secret(secret)
+        except Exception as e:
+            logger.error(f"Invalid base32 secret: {e}")
+            return False
         logger.info(f"Normalized secret: {normalized_secret}")
 
-        # Создаем TOTP объект с параметрами expo-totp
+        # Создаем TOTP объект с параметрами otplib
         totp = pyotp.TOTP(
             normalized_secret,
-            digits=6,        # expo-totp default
-            interval=30,     # expo-totp default
-            digest='sha1'    # expo-totp default
+            digits=6,        # otplib default
+            interval=30,     # otplib default
+            digest='sha1'    # otplib использует sha1 в нижнем регистре
         )
         
-        # Получаем текущее время
-        current_time = datetime.datetime.now()
-        logger.info(f"Current time: {current_time.timestamp()}")
+        # Если передан timestamp, используем его для проверки
+        if timestamp is not None:
+            current_time = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+            logger.info(f"Using provided timestamp: {timestamp} ({current_time.isoformat()})")
+            is_valid = totp.verify(token, for_time=timestamp, valid_window=1)
+        else:
+            # Получаем текущее время
+            current_time = datetime.datetime.now(datetime.timezone.utc)
+            logger.info(f"Using current time: {current_time.timestamp()} ({current_time.isoformat()})")
+            is_valid = totp.verify(token, valid_window=1)
         
         # Получаем текущий код для сравнения
-        current_code = totp.now()
+        current_code = totp.at(current_time)
         logger.info(f"Current TOTP code: {current_code}, Provided token: {token}")
         
         # Получаем коды для соседних интервалов для отладки
@@ -92,11 +117,9 @@ def verify_totp(secret: str, token: str) -> bool:
         next_code = totp.at(current_time + datetime.timedelta(seconds=30))
         logger.info(f"Previous code: {prev_code}, Next code: {next_code}")
         
-        # Проверяем код с окном в 1 интервал (30 секунд до и после)
-        is_valid = totp.verify(token, valid_window=1)
         logger.info(f"TOTP verification result: {is_valid}")
-        
         return is_valid
+        
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
         return False 
