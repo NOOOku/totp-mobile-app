@@ -8,7 +8,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # Database settings
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/totp_db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "https://totp-mobile-app.onrender.com")
     
     # JWT settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")

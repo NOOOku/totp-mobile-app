@@ -2,12 +2,15 @@ from passlib.context import CryptContext
 import datetime
 from typing import Union
 from jose import JWTError, jwt
-from pyotp import TOTP
 import secrets
 import os
 import logging
 import re
 import time
+import base64
+import hmac
+import hashlib
+import struct
 
 # JWT configuration
 SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
@@ -57,23 +60,8 @@ def generate_totp_secret() -> tuple[str, str]:
         # Generate short key
         short_secret = generate_short_secret()
         
-        # Create TOTP object with proper parameters
-        totp = TOTP(
-            full_secret,
-            digits=6,
-            interval=30,
-            digest='sha1'
-        )
-        
-        # Create URI for QR code (for Google Authenticator compatibility)
-        totp_uri = totp.provisioning_uri(
-            name="TOTP App",
-            issuer_name="Your App"
-        )
-        
         logger.info(f"Generated new TOTP secret. Short key: {short_secret}")
         logger.info(f"Full key: {full_secret}")
-        logger.info(f"TOTP URI: {totp_uri}")
         
         return full_secret, short_secret
     except Exception as e:
@@ -81,14 +69,48 @@ def generate_totp_secret() -> tuple[str, str]:
         raise
 
 def normalize_base32_secret(secret: str) -> str:
-    """
-    Нормализует и валидирует base32 секрет: только A-Z и 2-7, без пробелов, в верхнем регистре.
-    Идентична клиентской реализации.
-    """
+    """Normalize and validate base32 secret: A-Z and 2-7 only, no spaces, uppercase."""
     normalized = re.sub(r'\s+', '', secret.strip().upper())
     if not re.match(r'^[A-Z2-7]+$', normalized):
         raise ValueError('Secret is not valid base32 (A-Z, 2-7 only)')
     return normalized
+
+def base32_decode(encoded: str) -> bytes:
+    """Decode base32 string to bytes."""
+    # Add padding if necessary
+    padding = len(encoded) % 8
+    if padding != 0:
+        encoded += '=' * (8 - padding)
+    return base64.b32decode(encoded.upper())
+
+def generate_totp(secret: str, timestamp: int = None) -> str:
+    """Generate TOTP code for given secret and timestamp."""
+    if timestamp is None:
+        timestamp = int(time.time())
+    
+    # Counter is number of 30-second intervals since Unix epoch
+    counter = struct.pack('>Q', timestamp // 30)
+    
+    # Decode base32 secret
+    key = base32_decode(secret)
+    
+    # Calculate HMAC-SHA1
+    hmac_obj = hmac.new(key, counter, hashlib.sha1)
+    hmac_result = hmac_obj.digest()
+    
+    # Get offset
+    offset = hmac_result[-1] & 0xf
+    
+    # Generate 4-byte code
+    code_bytes = hmac_result[offset:offset + 4]
+    code_num = struct.unpack('>I', code_bytes)[0]
+    
+    # Get 6 digits
+    code = code_num & 0x7fffffff
+    code = str(code % 1000000)
+    
+    # Pad with zeros if necessary
+    return code.zfill(6)
 
 def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
     """Verify a TOTP token.
@@ -96,7 +118,7 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
     Args:
         secret: The TOTP secret key
         token: The TOTP token to verify
-        timestamp: Optional timestamp to use for verification (for handling time drift)
+        timestamp: Optional timestamp to use for verification
     """
     logger = logging.getLogger(__name__)
     try:
@@ -105,7 +127,7 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
         logger.info(f"Input token: {token}")
         logger.info(f"Input timestamp: {timestamp}")
         
-        # Проверяем формат секрета и токена
+        # Check secret and token format
         if not secret or not token:
             logger.error("Secret or token is empty")
             return False
@@ -114,7 +136,7 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
             logger.error(f"Invalid token format. Token: {token}")
             return False
 
-        # Строго нормализуем и валидируем секрет
+        # Normalize and validate secret
         try:
             normalized_secret = normalize_base32_secret(secret)
             logger.info(f"Normalized secret: {normalized_secret}")
@@ -123,51 +145,22 @@ def verify_totp(secret: str, token: str, timestamp: int = None) -> bool:
             logger.error(f"Invalid base32 secret: {e}")
             return False
 
-        # Логируем конфигурацию TOTP
-        logger.info("TOTP Configuration:")
-        logger.info("- Digits: 6")
-        logger.info("- Interval: 30")
-        logger.info("- Algorithm: sha1")
-
-        # Создаем TOTP объект с теми же параметрами, что и при генерации
-        totp = TOTP(
-            normalized_secret,
-            digits=6,
-            interval=30,
-            digest='sha1'
-        )
-        
-        # Получаем текущее время в секундах
+        # Get current timestamp
         current_timestamp = timestamp if timestamp is not None else int(time.time())
         logger.info(f"Using current time: {current_timestamp}")
         
-        # Конвертируем в UTC для логирования
-        current_time = datetime.datetime.fromtimestamp(current_timestamp, tz=datetime.timezone.utc)
-        logger.info(f"Converted to UTC: {current_time.isoformat()}")
+        # Check codes for current and adjacent intervals
+        for drift in [-1, 0, 1]:  # Check previous, current, and next interval
+            check_time = current_timestamp + (drift * 30)
+            generated_token = generate_totp(normalized_secret, check_time)
+            logger.info(f"Generated token for drift {drift}: {generated_token}")
+            
+            if token == generated_token:
+                logger.info(f"Token matched with drift {drift}")
+                return True
         
-        # Вычисляем T0 (количество 30-секундных интервалов)
-        time_counter = int(current_timestamp / 30)
-        logger.info(f"Time counter (T0): {time_counter}")
-        
-        # Генерируем текущий код
-        current_code = totp.at(current_timestamp)
-        logger.info(f"Generated TOTP code: {current_code}")
-        logger.info(f"Provided token: {token}")
-        
-        # Генерируем коды для соседних интервалов
-        prev_time = current_timestamp - 30
-        next_time = current_timestamp + 30
-        prev_code = totp.at(prev_time)
-        next_code = totp.at(next_time)
-        logger.info(f"Previous interval code: {prev_code}")
-        logger.info(f"Next interval code: {next_code}")
-        
-        # Проверяем код с расширенным окном
-        is_valid = totp.verify(token, valid_window=2)
-        logger.info(f"Verification result: {is_valid}")
-        logger.info("=== End Debug Info ===")
-        
-        return is_valid
+        logger.info("No matching tokens found")
+        return False
         
     except Exception as e:
         logger.error(f"Error verifying TOTP: {str(e)}")
