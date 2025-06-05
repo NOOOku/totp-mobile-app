@@ -298,7 +298,7 @@ async def qr_login(request: QRLoginRequest, db: Session = Depends(get_db)):
             detail="Request expired"
         )
     
-    # Verify user credentials and TOTP code
+    # Get user and their TOTP secret
     user = db.query(models.User).filter(models.User.username == request.username).first()
     if not user:
         raise HTTPException(
@@ -306,10 +306,26 @@ async def qr_login(request: QRLoginRequest, db: Session = Depends(get_db)):
             detail="Invalid credentials"
         )
     
-    if not utils.verify_totp(user.totp_secret, request.totp_code):
+    # Get TOTP secret from database
+    totp_secret = crud.get_totp_by_user_id(db, user.id)
+    if not totp_secret:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid TOTP code"
+            detail="TOTP not set up for this user"
+        )
+    
+    # Verify TOTP code
+    try:
+        normalized_secret = utils.normalize_base32_secret(totp_secret.secret)
+        if not utils.verify_totp(normalized_secret, request.totp_code):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid TOTP code"
+            )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
     
     # Create access token
