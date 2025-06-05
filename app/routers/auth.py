@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from .. import crud, models, schemas, utils
 from ..database import get_db
@@ -7,11 +7,17 @@ from pydantic import BaseModel
 import logging
 from typing import Optional, Dict
 from jose import jwt, JWTError
-from datetime import timedelta
+from datetime import timedelta, datetime
+import secrets
+import json
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Store QR sessions in memory (in production, use Redis or similar)
+qr_sessions = {}
 
 class Token(BaseModel):
     access_token: str
@@ -22,6 +28,15 @@ class Token(BaseModel):
 
 class MobileLoginRequest(BaseModel):
     short_secret: str
+
+class QRSession(BaseModel):
+    sessionId: str
+
+class QRLoginRequest(BaseModel):
+    session_id: str
+    username: str
+    totp_code: str
+    timestamp: int
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
@@ -227,4 +242,81 @@ async def login(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Неверный код аутентификации"
-    ) 
+    )
+
+@router.post("/qr-session")
+async def create_qr_session():
+    """Create a new QR session for login"""
+    session_id = secrets.token_urlsafe(32)
+    qr_sessions[session_id] = {
+        "created_at": datetime.utcnow(),
+        "status": "pending",
+        "token": None
+    }
+    return {"sessionId": session_id}
+
+@router.get("/qr-session/{session_id}")
+async def check_qr_session(session_id: str):
+    """Check the status of a QR login session"""
+    if session_id not in qr_sessions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    session = qr_sessions[session_id]
+    
+    # Clean up expired sessions
+    if datetime.utcnow() - session["created_at"] > timedelta(minutes=5):
+        del qr_sessions[session_id]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session expired"
+        )
+    
+    return {
+        "status": session["status"],
+        "token": session["token"] if session["status"] == "authenticated" else None
+    }
+
+@router.post("/qr-login")
+async def qr_login(request: QRLoginRequest, db: Session = Depends(get_db)):
+    """Handle QR code login from mobile app"""
+    if request.session_id not in qr_sessions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    session = qr_sessions[request.session_id]
+    
+    # Verify timestamp to prevent replay attacks
+    request_time = datetime.fromtimestamp(request.timestamp / 1000.0)
+    if datetime.utcnow() - request_time > timedelta(minutes=5):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request expired"
+        )
+    
+    # Verify user credentials and TOTP code
+    user = db.query(models.User).filter(models.User.username == request.username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
+    
+    if not utils.verify_totp(user.totp_secret, request.totp_code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid TOTP code"
+        )
+    
+    # Create access token
+    access_token = utils.create_access_token(data={"sub": user.username})
+    
+    # Update session status
+    session["status"] = "authenticated"
+    session["token"] = access_token
+    
+    return {"status": "success"} 
